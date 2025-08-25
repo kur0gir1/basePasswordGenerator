@@ -1,9 +1,12 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useConnect, useDisconnect } from 'wagmi';
+import { useDisconnect } from 'wagmi';
 // keep imports minimal: we only need wallet and generator UI
 import { useAccount } from 'wagmi';
+
+// lightweight Ethereum provider type to avoid using `any`
+type Ethereum = { request: (args: { method: string }) => Promise<unknown> } & Record<string, unknown>;
 
 // Removed demo component/template lists to keep page focused on wallet + generator
 
@@ -125,7 +128,7 @@ function PasswordGeneratorCard() {
 
     window.addEventListener('mousemove', onMove);
     return () => window.removeEventListener('mousemove', onMove);
-  }, [running]);
+  }, [running, generateNext]);
 
   // double click toggles run; require wallet connected
   function onDoubleClick(e?: React.MouseEvent) {
@@ -147,6 +150,17 @@ function PasswordGeneratorCard() {
       setCrackTime('');
     }
   }, [isConnected]);
+
+  // clear copy timeout if component unmounts
+  // (keeps lint happy about dangling timers)
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+        copyTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
     return (
     <div
@@ -194,7 +208,7 @@ function PasswordGeneratorCard() {
                 setCopied(false);
                 copyTimeoutRef.current = null;
               }, 2000) as unknown as number;
-            } catch (e) {
+            } catch {
               // ignore clipboard failures
             }
           }}
@@ -224,21 +238,23 @@ function PasswordGeneratorCard() {
   );
 }
 
+// (copy-timeout cleanup is handled inside PasswordGeneratorCard)
+
 function WalletHeader() {
   const { address, isConnected } = useAccount();
-  const { connectAsync } = useConnect();
   const { disconnectAsync } = useDisconnect();
 
   const connect = async () => {
     try {
       // try wagmi connector first if available
-      if (typeof (window as any).ethereum !== 'undefined') {
-        // prefer a direct request if wagmi connector import is not available
-        await (window as any).ethereum.request({ method: 'eth_requestAccounts' });
+      const eth = typeof window !== 'undefined' ? (window as unknown as { ethereum?: Ethereum }).ethereum : undefined;
+      if (eth) {
+        await eth.request({ method: 'eth_requestAccounts' });
       } else {
-        await connectAsync({ connector: undefined as any });
+        // no injected provider available; nothing to do here in this minimal flow
+        // keep the behavior silent — connect via wallet modal would go here
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
   };
@@ -246,7 +262,9 @@ function WalletHeader() {
   const disconnect = async () => {
     try {
       await disconnectAsync();
-    } catch {}
+    } catch {
+      // ignore
+    }
   };
 
   return (
@@ -263,25 +281,4 @@ function WalletHeader() {
   );
 }
 
-function MetaMaskButton() {
-  const { address, isConnected } = useAccount();
-  const { connectAsync } = useConnect();
-
-  const connect = async () => {
-    try {
-      if (typeof (window as any).ethereum !== 'undefined') {
-        await (window as any).ethereum.request({ method: 'eth_requestAccounts' });
-      } else {
-        await connectAsync({ connector: undefined as any });
-      }
-    } catch (e) {
-      // ignore
-    }
-  };
-
-  return isConnected ? (
-    <div className="px-3 py-1 rounded border">Connected</div>
-  ) : (
-    <button onClick={connect} className="px-3 py-1 rounded bg-orange-600 text-white">Connect MetaMask</button>
-  );
-}
+// MetaMaskButton removed — WalletHeader handles injected-provider connect in this minimal app
